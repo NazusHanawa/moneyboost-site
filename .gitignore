@@ -4,3 +4,4 @@ access_counts.csv
 .db
 cache.db-shm
 cache.db-wal
+cache.db
