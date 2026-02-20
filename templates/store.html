@@ -1,0 +1,823 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<section>
+    <div style="margin-bottom: 2rem;">
+        <h1 style="margin-top: 1rem;">
+            {% if store.url %}
+            <a href="{{ store.url }}" target="_blank"
+                style="text-decoration: none; color: inherit; border-bottom: 2px solid transparent; transition: border-color 0.2s;"
+                onmouseover="this.style.borderColor='var(--accent-color)'"
+                onmouseout="this.style.borderColor='transparent'">
+                {{ store.name }} &nearr;
+            </a>
+            {% else %}
+            {{ store.name }}
+            {% endif %}
+        </h1>
+    </div>
+
+    <h2>Comparativo de Cashback</h2>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Plataforma</th>
+                    <th>Valor</th>
+                    <th>Verificado</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cashback in cashbacks %}
+                <tr onclick="window.open('{{ cashback.partnership_url }}', '_blank')"
+                    style="cursor: pointer; transition: background-color 0.2s;"
+                    onmouseover="this.style.backgroundColor='rgba(0,0,0,0.02)'"
+                    onmouseout="this.style.backgroundColor='transparent'">
+                    <td style="font-weight: 500;">{{ cashback.platform_name }}</td>
+                    <td style="color: var(--success-color); font-weight: 700;">
+                        {{ cashback.value }}%
+                        {% if cashback.value_specific and cashback.value_specific > cashback.value %}
+                        <div class="text-sm text-muted" style="font-weight: 400; color: #888;">Até {{
+                            cashback.value_specific }}%</div>
+                        {% endif %}
+                    </td>
+                    <td class="text-sm text-muted">{{ cashback.date_end | brasilia_time }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3" style="text-align: center; padding: 2rem;" class="text-muted">Nenhum cashback ativo
+                        encontrado para esta loja.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+</section>
+
+<section style="margin-top: 3rem;">
+    <h2>Histórico de Cashback</h2>
+
+    <div class="card" style="padding: 1.5rem;">
+        
+        
+        <div class="platform-filters" style="margin-bottom: 1.5rem;">
+            {% set platforms_seen = [] %}
+            {% for cashback in cashbacks %}
+            {% if cashback.platform_name not in platforms_seen %}
+            {% set _ = platforms_seen.append(cashback.platform_name) %}
+            <label class="filter-chip">
+                <input type="checkbox" class="platform-filter" value="{{ cashback.platform_name }}" checked
+                    onchange="updateChart()">
+                <span>{{ cashback.platform_name }}</span>
+            </label>
+            {% endif %}
+            {% endfor %}
+        </div>
+
+        
+        <div class="chart-controls chart-toolbar">
+
+            
+            <div class="date-picker-group date-picker-left">
+                <button class="btn-outline date-btn" onclick="adjustDate('startDate', -1)">&lt;</button>
+                <input type="date" id="startDate" onchange="validateDates('startDate')" class="date-input">
+                <button class="btn-outline date-btn" onclick="adjustDate('startDate', 1)">&gt;</button>
+            </div>
+
+            
+            <div class="view-toggle chart-toggle-center">
+                <label class="toggle-option">
+                    <input type="radio" name="chart-view-mode" value="global" checked onchange="updateChart()">
+                    <span>Geral</span>
+                </label>
+                <label class="toggle-option">
+                    <input type="radio" name="chart-view-mode" value="max" onchange="updateChart()">
+                    <span>Ofertas</span>
+                </label>
+            </div>
+
+            
+            <div class="date-picker-group date-picker-right">
+                <button class="btn-outline date-btn" onclick="adjustDate('endDate', -1)">&lt;</button>
+                <input type="date" id="endDate" onchange="validateDates('endDate')" class="date-input">
+                <button class="btn-outline date-btn" onclick="adjustDate('endDate', 1)">&gt;</button>
+            </div>
+        </div>
+
+        
+        <div style="height: 500px; position: relative; width: 100%;">
+            <canvas id="historyChart"></canvas>
+        </div>
+
+        
+        
+        <div id="detailsListContainer" style="margin-top: 2rem; display: none; width: 100%;">
+            <h3
+                style="margin-bottom: 1rem; font-size: 1.1rem; color: var(--text-color); border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                <span>Detalhes em <span id="selectedTimeLabel" style="color: var(--accent-color);"></span></span>
+                <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">Clique no gráfico para
+                    alterar</span>
+            </h3>
+
+            <div id="detailsList" class="details-grid">
+                
+            </div>
+
+            <p id="noDetailsMsg" style="color: var(--text-muted); font-style: italic; display: none;">Nenhum cashback
+                ativo neste horário.</p>
+        </div>
+    </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script
+    src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
+    let chartInstance = null;
+    let currentDetailTime = null;
+    const allHistoryData = {{ history_data | tojson | safe }};
+
+    function fetchHistory() {
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+        const selectedPlatforms = Array.from(document.querySelectorAll('.platform-filter:checked')).map(cb => cb.value);
+
+        const startMs = start ? new Date(start + 'T00:00:00').getTime() : -Infinity;
+        const endMs = end ? new Date(end + 'T23:59:59').getTime() : Infinity;
+
+        return allHistoryData.filter(item => {
+            if (!selectedPlatforms.includes(item.platform)) return false;
+            const itemStart = new Date(item.date).getTime();
+            const itemEnd = item.date_end ? new Date(item.date_end).getTime() : Infinity;
+            return itemEnd >= startMs && itemStart <= endMs;
+        });
+    }
+
+    // Fully client-side updateChart
+    function updateChart() {
+        const data = fetchHistory();
+        const startInput = document.getElementById('startDate').value;
+        const endInput = document.getElementById('endDate').value;
+
+        // Get View Mode
+        const viewModeRadio = document.querySelector('input[name="chart-view-mode"]:checked');
+        const viewMode = viewModeRadio ? viewModeRadio.value : 'global';
+
+        // Group data by platform
+        const datasets = [];
+        const platforms = {};
+
+        // Find the latest recorded timestamp across all data
+
+
+        data.forEach(item => {
+            if (!platforms[item.platform]) {
+                platforms[item.platform] = [];
+            }
+
+            // Determine value based on mode
+            let val = item.value; // Default Global
+            if (viewMode === 'max' && item.value_specific > val) {
+                val = item.value_specific;
+            }
+
+            platforms[item.platform].push({
+                x: item.date, // Full datetime 'YYYY-MM-DD HH:MM:SS'
+                y: val,
+                date_end: item.date_end
+            });
+        });
+
+        // Process each platform
+        Object.keys(platforms).forEach(platformName => {
+            const rawPoints = platforms[platformName];
+
+            // Sort raw points by start date
+            rawPoints.sort((a, b) => new Date(a.x) - new Date(b.x));
+
+            const finalData = [];
+
+            for (let i = 0; i < rawPoints.length; i++) {
+                const item = rawPoints[i];
+                const startDate = item.x; // 'YYYY-MM-DD HH:MM:SS'
+
+                // Determine End Date
+                // If item.date_end is null, it's active. Use last recorded time.
+                let endDate = item.date_end;
+                const now = new Date();
+
+                if (!endDate) {
+                    endDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000))
+                        .toISOString()
+                        .replace('T', ' ')
+                        .substring(0, 19);
+                } else {
+                    // Check if endDate is in the future relative to now
+                    const endObj = new Date(endDate);
+                    if (endObj > now) {
+                        endDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000))
+                            .toISOString()
+                            .replace('T', ' ')
+                            .substring(0, 19);
+                    }
+                }
+
+                const val = item.y;
+
+                // Add Point 1: Start
+                finalData.push({ x: startDate, y: val, original: item });
+
+                // Add Point 2: End (Horizontal Line)
+                finalData.push({ x: endDate, y: val, original: item });
+
+                // Handle Gap to next item
+                if (i < rawPoints.length - 1) {
+                    const nextItem = rawPoints[i + 1];
+                    const nextStartMs = new Date(nextItem.x).getTime();
+                    const endMs = new Date(endDate).getTime();
+
+                    // Gap check (tolerance of 5 minutes to connect consecutive periods)
+                    // If gap is greater than 5 minutes, break line.
+                    if (nextStartMs > endMs + 5 * 60 * 1000) {
+                        // Insert null to break line at the gap edge
+                        finalData.push({ x: endMs + 1000, y: null, original: null });
+                    } else if (nextStartMs > endMs) {
+                        // Connect small gaps
+                        finalData.push({ x: nextStartMs, y: val, original: item });
+                    }
+                }
+            }
+
+            datasets.push({
+                label: platformName,
+                data: finalData,
+                borderColor: stringToColor(platformName),
+                backgroundColor: 'transparent',
+                fill: false,
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 6,
+                tension: 0,
+                spanGaps: false
+            });
+        });
+
+        // ---------------------------------------------------------
+        // AUTO-SELECT CURRENT BEST OFFER TO SHOW IN DETAILS
+        // ---------------------------------------------------------
+        // Replaced with renderDetails(new Date().getTime())
+
+        const ctx = document.getElementById('historyChart').getContext('2d');
+
+        if (chartInstance) {
+            chartInstance.destroy();
+        }
+
+        // Determine axis bounds
+        const minDate = startInput ? startInput + 'T00:00:00' : undefined;
+
+        let maxDate;
+        const now = new Date();
+        const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+
+        if (endInput === todayStr) {
+            maxDate = now;
+        } else {
+            maxDate = endInput ? endInput + 'T23:59:59' : undefined;
+        }
+
+        // Helper to format date for Tooltip
+        function formatTooltipDate(dateMs) {
+            const d = new Date(dateMs);
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            const hour = String(d.getHours()).padStart(2, '0');
+            const min = String(d.getMinutes()).padStart(2, '0');
+            return `${day}/${month}/${year} ${hour}:${min}`;
+        }
+
+
+
+        // Internal helper to render the list of cards
+        function renderDetails(timeMs) {
+            const listContainer = document.getElementById('detailsListContainer');
+            const list = document.getElementById('detailsList');
+            const msg = document.getElementById('noDetailsMsg');
+            const timeLabel = document.getElementById('selectedTimeLabel');
+
+
+            if (!listContainer || !list || !msg || !timeLabel) return;
+
+            // Persist selection
+            currentDetailTime = timeMs;
+
+            listContainer.style.display = 'block';
+            timeLabel.textContent = formatTooltipDate(timeMs);
+            list.innerHTML = '';
+
+            // Find all active points at this time from raw history data
+            // This is more reliable than checking chart points
+            const activeItems = allHistoryData.filter(item => {
+                const startMs = new Date(item.date).getTime();
+                // If date_end is null, assume active until now (or forever in history context)
+                // Use a generous buffer for precision issues if needed, but exact comparison usually works with ranges
+                const endMs = item.date_end ? new Date(item.date_end).getTime() : new Date().getTime();
+
+                return timeMs >= startMs && timeMs <= endMs;
+            });
+
+            // Sort by true value (deciding which value to sort by - likely the highest)
+            activeItems.sort((a, b) => {
+                const valA = Math.max(a.value, a.value_specific || 0);
+                const valB = Math.max(b.value, b.value_specific || 0);
+                return valB - valA;
+            });
+
+            if (activeItems.length === 0) {
+                msg.style.display = 'block';
+                // Try to find the closest previous point if none active? 
+                // For now, just show "No active cashback".
+            } else {
+                msg.style.display = 'none';
+                activeItems.forEach(item => {
+                    const color = stringToColor(item.platform);
+                    const card = document.createElement('div');
+                    card.style.cssText = `
+                        background: var(--card-bg); 
+                        border: 1px solid var(--border-color); 
+                        border-left: 4px solid ${color};
+                        border-radius: 6px; 
+                        padding: 1rem;
+                    `;
+
+                    const valSpecific = item.value_specific ? parseFloat(item.value_specific).toFixed(2) + '%' : '-';
+                    const valGlobal = parseFloat(item.value).toFixed(2) + '%';
+
+                    card.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                            <strong style="font-size: 1.05em;">${item.platform}</strong>
+                            <span style="font-weight: 700; color: var(--success-color); font-size: 1.1em;">${valGlobal}</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.9em; color: var(--text-muted);">
+                            <div>
+                                <span style="display:block; font-size:0.8em;">Início</span>
+                                <span style="color: var(--text-color);">${formatTooltipDate(new Date(item.date).getTime())}</span>
+                            </div>
+                            <div>
+                                <span style="display:block; font-size:0.8em;">Fim</span>
+                                <span style="color: var(--text-color);">${item.date_end ? formatTooltipDate(new Date(item.date_end).getTime()) : 'Ativo'}</span>
+                            </div>
+                        </div>
+                        ${item.value_specific && valSpecific !== valGlobal ? `
+                        <div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--border-color);">
+                             <div style="display: flex; justify-content: space-between;">
+                                <span style="font-size: 0.9em;">Oferta Especial:</span>
+                                <strong style="color: var(--text-color);">${valSpecific}</strong>
+                             </div>
+                        </div>
+                        ` : ''}
+                        <div style="margin-top: 0.5rem; font-size: 0.9em; opacity: 0.8;">
+                            ${item.description || ''}
+                        </div>
+                    `;
+                    list.appendChild(card);
+                });
+            }
+        }
+
+        // Custom plugin to draw values and time at mouse X and snap to nearest valid data
+        const crosshairPlugin = {
+            id: 'crosshair',
+            afterInit: (chart) => {
+                chart.crosshair = { x: 0, y: 0, visible: false, lastSnappedTime: null, snappedTime: null, snappedX: null };
+            },
+            afterEvent: (chart, args) => {
+                const { inChartArea } = args;
+                const { x, y, type } = args.event;
+                chart.crosshair.x = x;
+                chart.crosshair.y = y;
+                chart.crosshair.visible = inChartArea;
+
+                if (inChartArea && type === 'mousemove') {
+                    const xScale = chart.scales.x;
+                    let timeAtX = xScale.getValueForPixel(x);
+
+                    let isInside = false;
+                    let closestTime = null;
+                    let minDistance = Infinity;
+
+                    // Find if over a valid segment, or get the nearest one
+                    chart.data.datasets.forEach((dataset, index) => {
+                        const meta = chart.getDatasetMeta(index);
+                        if (meta.hidden) return;
+
+                        for (let i = 0; i < dataset.data.length - 1; i++) {
+                            const p1 = dataset.data[i];
+                            const p2 = dataset.data[i + 1];
+                            if (p1.y === null || p2.y === null) continue;
+
+                            const t1 = new Date(p1.x).getTime();
+                            const t2 = new Date(p2.x).getTime();
+
+                            if (timeAtX >= t1 && timeAtX <= t2) {
+                                isInside = true;
+                            } else {
+                                const dist1 = Math.abs(t1 - timeAtX);
+                                const dist2 = Math.abs(t2 - timeAtX);
+                                if (dist1 < minDistance) { minDistance = dist1; closestTime = t1; }
+                                if (dist2 < minDistance) { minDistance = dist2; closestTime = t2; }
+                            }
+                        }
+                    });
+
+                    let snappedTime = timeAtX;
+                    if (!isInside && closestTime !== null) {
+                        snappedTime = closestTime;
+                    }
+
+                    chart.crosshair.snappedTime = snappedTime;
+                    chart.crosshair.snappedX = (!isInside && closestTime !== null) ? xScale.getPixelForValue(closestTime) : x;
+                }
+
+                chart.draw();
+            },
+            afterDraw: (chart) => {
+                if (chart.crosshair && chart.crosshair.visible) {
+                    const ctx = chart.ctx;
+                    const { top, bottom, left, right } = chart.chartArea;
+
+                    let x = chart.crosshair.snappedX !== null ? chart.crosshair.snappedX : chart.crosshair.x;
+                    let timeAtX = chart.crosshair.snappedTime !== null ? chart.crosshair.snappedTime : chart.scales.x.getValueForPixel(x);
+
+                    if (x < left || x > right) return;
+
+                    // Draw Vertical Line
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(x, top);
+                    ctx.lineTo(x, bottom);
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.setLineDash([5, 5]);
+                    ctx.stroke();
+
+                    // Find Values for each dataset
+                    const pointsToDraw = [];
+                    let maxLabelWidth = 0;
+
+                    chart.data.datasets.forEach((dataset, index) => {
+                        const meta = chart.getDatasetMeta(index);
+                        if (meta.hidden) return;
+
+                        let value = null;
+                        for (let i = 0; i < dataset.data.length - 1; i++) {
+                            const p1 = dataset.data[i];
+                            const p2 = dataset.data[i + 1];
+                            const t1 = new Date(p1.x).getTime();
+                            const t2 = new Date(p2.x).getTime();
+
+                            if (timeAtX >= t1 && timeAtX <= t2) {
+                                if (p1.y !== null && p2.y !== null) {
+                                    value = p1.y;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (value !== null) {
+                            const label = `${dataset.label}: ${value}%`;
+                            const width = ctx.measureText(label).width;
+                            if (width > maxLabelWidth) maxLabelWidth = width;
+
+                            pointsToDraw.push({
+                                label: dataset.label,
+                                value: value,
+                                color: dataset.borderColor,
+                                text: label
+                            });
+                        }
+                    });
+
+                    // Sort points by value (descending)
+                    pointsToDraw.sort((a, b) => b.value - a.value);
+
+                    // Draw Tooltip Box if we have data
+                    if (pointsToDraw.length > 0) {
+                        const dateStr = formatTooltipDate(timeAtX);
+                        const dateWidth = ctx.measureText(dateStr).width;
+
+                        const lineHeight = 18;
+                        const padding = 10;
+                        const boxWidth = Math.max(maxLabelWidth, dateWidth) + padding * 3 + 10; // +10 for color dot
+                        const boxHeight = (pointsToDraw.length + 1) * lineHeight + padding * 2;
+
+                        // Determine Box Position (follow mouse, prevent overflow)
+                        let boxX = x + 15;
+                        let boxY = chart.crosshair.y - boxHeight / 2;
+
+                        // Flip to left if overflow right
+                        if (boxX + boxWidth > right) {
+                            boxX = x - boxWidth - 15;
+                        }
+
+                        // Clamp Y
+                        if (boxY < top) boxY = top + 5;
+                        if (boxY + boxHeight > bottom) boxY = bottom - boxHeight - 5;
+
+                        // Draw Box Background
+                        ctx.beginPath();
+                        ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 6);
+                        ctx.fillStyle = 'rgba(20, 20, 20, 0.9)'; // Dark background
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                        ctx.lineWidth = 1;
+                        ctx.fill();
+                        ctx.stroke();
+
+                        // Draw Date Header
+                        ctx.textAlign = 'left';
+                        ctx.textBaseline = 'top';
+                        ctx.fillStyle = '#fff';
+                        ctx.font = 'bold 12px Inter, sans-serif';
+                        ctx.fillText(dateStr, boxX + padding, boxY + padding);
+
+                        // Draw Separator Line
+                        ctx.beginPath();
+                        ctx.moveTo(boxX + padding, boxY + padding + lineHeight - 4);
+                        ctx.lineTo(boxX + boxWidth - padding, boxY + padding + lineHeight - 4);
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                        ctx.stroke();
+
+                        // Draw Points
+                        pointsToDraw.forEach((p, i) => {
+                            const lineY = boxY + padding + (i + 1) * lineHeight;
+
+                            // Color Dot
+                            ctx.beginPath();
+                            ctx.arc(boxX + padding + 4, lineY + 6, 4, 0, 2 * Math.PI);
+                            ctx.fillStyle = p.color;
+                            ctx.fill();
+
+                            // Text
+                            ctx.fillStyle = '#eee';
+                            ctx.font = '12px Inter, sans-serif';
+                            ctx.fillText(p.text, boxX + padding + 14, lineY);
+                        });
+
+                        // Draw Highlight Dots on Line at intersection Y
+                        pointsToDraw.forEach(p => {
+                            const yPos = chart.scales.y.getPixelForValue(p.value);
+                            ctx.beginPath();
+                            ctx.arc(x, yPos, 4, 0, 2 * Math.PI);
+                            ctx.fillStyle = p.color; // filled dot
+                            ctx.fill();
+                            ctx.strokeStyle = '#fff'; // outline
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        });
+                    }
+
+                    ctx.restore();
+                }
+            }
+        };
+
+        // Determine max Y value
+        let maxY = 0;
+        datasets.forEach(d => {
+            d.data.forEach(p => {
+                if (p.y !== null && p.y > maxY) {
+                    maxY = p.y;
+                }
+            });
+        });
+
+        chartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                datasets: datasets
+            },
+            plugins: [crosshairPlugin], // Register plugins
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'none',   // Disable default interaction
+                    intersect: false
+                },
+                onClick: (e) => {
+                    if (chartInstance.crosshair && chartInstance.crosshair.snappedTime !== null) {
+                        renderDetails(chartInstance.crosshair.snappedTime);
+                    } else {
+                        const canvasPosition = Chart.helpers.getRelativePosition(e, chartInstance);
+                        const timeAtX = chartInstance.scales.x.getValueForPixel(canvasPosition.x);
+                        if (timeAtX) {
+                            renderDetails(timeAtX);
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: {
+                                hour: 'dd/MM HH:mm',
+                                day: 'dd/MM/yyyy'
+                            },
+                            tooltipFormat: 'dd/MM/yyyy HH:mm'
+                        },
+                        min: minDate,
+                        max: maxDate,
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: {
+                            color: '#888',
+                            source: 'auto',
+                            maxRotation: 0,
+                            minRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: 8
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: maxY + 5, // Add 5 to max value as requested
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#888' }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { enabled: false } // Disable default tooltip logic to prevent conflict with crosshair
+                }
+            }
+        });
+
+        // Render details: Use persisted time or find latest data point
+        if (currentDetailTime) {
+            renderDetails(currentDetailTime);
+        } else {
+            if (allHistoryData && allHistoryData.length > 0) {
+                const maxDate = allHistoryData.reduce((max, item) => {
+                    const d = new Date(item.date).getTime();
+                    return d > max ? d : max;
+                }, 0);
+                renderDetails(maxDate);
+            } else {
+                renderDetails(new Date().getTime());
+            }
+        }
+
+        // Apply platform colors to filter chips
+        applyFilterColors();
+    }
+
+    function applyFilterColors() {
+        document.querySelectorAll('.filter-chip').forEach(chip => {
+            const input = chip.querySelector('.platform-filter');
+            const span = chip.querySelector('span');
+            if (!input || !span) return;
+            const platformName = input.value;
+            const color = stringToColor(platformName);
+            span.style.transition = 'all 0.25s ease';
+            if (input.checked) {
+                span.style.borderColor = color;
+                span.style.borderWidth = '1.5px';
+                span.style.color = '#fff';
+                span.style.fontWeight = '500';
+                span.style.backgroundColor = addAlpha(color, 0.08);
+                span.style.boxShadow = `0 0 12px ${addAlpha(color, 0.2)}`;
+            } else {
+                span.style.borderColor = '';
+                span.style.borderWidth = '';
+                span.style.color = '';
+                span.style.fontWeight = '';
+                span.style.backgroundColor = '';
+                span.style.boxShadow = '';
+            }
+        });
+    }
+
+    // Helper for alpha color (ensure reusable or inline)
+    function addAlpha(color, opacity) {
+        // Simple hex to rgba conversion
+        if (color.startsWith('#')) {
+            let c = color.substring(1);
+            if (c.length === 3) c = c[0] + c[0] + c[1] + c[1] + c[2] + c[2];
+            const r = parseInt(c.substring(0, 2), 16);
+            const g = parseInt(c.substring(2, 4), 16);
+            const b = parseInt(c.substring(4, 6), 16);
+            return `rgba(${r},${g},${b},${opacity})`;
+        }
+        return color;
+    }
+
+    // Helper to generate consistent color from string
+    function stringToColor(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+        return '#' + '00000'.substring(0, 6 - c.length) + c;
+    }
+
+    // Helper to enforce Start <= End and update chart
+    function validateDates(changedInputId) {
+        const startInput = document.getElementById('startDate');
+        const endInput = document.getElementById('endDate');
+
+        if (!startInput.value || !endInput.value) {
+            updateChart();
+            return;
+        }
+
+        let start = new Date(startInput.value);
+        let end = new Date(endInput.value);
+
+        // Enforce Minimum Distance of 1 Day (Start < End)
+        if (start >= end) {
+            if (changedInputId === 'startDate') {
+                // User moved Start forward -> Push End forward
+                const newEnd = new Date(start);
+                newEnd.setDate(newEnd.getDate() + 1);
+                const newEndStr = newEnd.toISOString().split('T')[0];
+
+                // Check if pushed past Max (Today)
+                if (newEndStr > endInput.max) {
+                    endInput.value = endInput.max;
+                    const maxStart = new Date(endInput.value);
+                    maxStart.setDate(maxStart.getDate() - 1);
+                    startInput.value = maxStart.toISOString().split('T')[0];
+                } else {
+                    endInput.value = newEndStr;
+                }
+            } else {
+                // User moved End backward -> Push Start backward
+                const newStart = new Date(end);
+                newStart.setDate(newStart.getDate() - 1);
+                startInput.value = newStart.toISOString().split('T')[0];
+            }
+        }
+
+        updateChart();
+    }
+
+    // Helper to adjust date by n days
+    function adjustDate(inputId, days) {
+        const input = document.getElementById(inputId);
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        const todayStr = `${year}-${month}-${day}`;
+
+        if (!input.value) {
+            input.value = todayStr;
+        }
+
+        const date = new Date(input.value);
+        date.setDate(date.getDate() + days);
+
+        const newDateStr = date.toISOString().split('T')[0];
+
+        if (newDateStr > todayStr) {
+            input.value = todayStr;
+            validateDates(inputId);
+            return;
+        }
+
+        input.value = newDateStr;
+        validateDates(inputId);
+    }
+
+    // Initialize chart on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        const todayStr = `${year}-${month}-${day}`;
+
+        // Set max date for picker
+        document.getElementById('startDate').max = todayStr;
+        document.getElementById('endDate').max = todayStr;
+
+        // Set default values if empty
+        if (!document.getElementById('startDate').value) {
+            const twoDaysAgo = new Date(today);
+            twoDaysAgo.setDate(today.getDate() - 2);
+
+            document.getElementById('endDate').value = todayStr;
+            document.getElementById('startDate').value = twoDaysAgo.toISOString().split('T')[0];
+        } else {
+            if (document.getElementById('endDate').value > todayStr) {
+                document.getElementById('endDate').value = todayStr;
+            }
+        }
+        updateChart();
+    });
+</script>
+
+{% endblock %}

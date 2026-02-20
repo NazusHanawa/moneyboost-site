@@ -1,0 +1,175 @@
+-- CONFIG
+PRAGMA foreign_keys = ON;
+
+-- CREATE TABLES
+CREATE TABLE IF NOT EXISTS stores (
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    url TEXT
+);
+
+CREATE TABLE IF NOT EXISTS platforms (
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    url TEXT
+);
+
+CREATE TABLE IF NOT EXISTS partnerships (
+    id INTEGER PRIMARY KEY,
+    store_id INTEGER NOT NULL,
+    platform_id INTEGER NOT NULL,
+    url TEXT,
+
+    UNIQUE(store_id, platform_id),
+    FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE,
+    FOREIGN KEY (platform_id) REFERENCES platforms(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS cashbacks (
+    id INTEGER PRIMARY KEY,
+    partnership_id INTEGER NOT NULL,
+    global_value REAL NOT NULL CHECK (global_value >= 0),
+    max_value REAL CHECK (max_value >= global_value),
+    description TEXT,
+    
+    date_start TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    date_end TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+
+    FOREIGN KEY (partnership_id) REFERENCES partnerships(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS table_updates (
+    table_name TEXT PRIMARY KEY,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- BASE ROWS
+INSERT OR IGNORE INTO table_updates (table_name) VALUES 
+    ('stores'), 
+    ('platforms'), 
+    ('partnerships'), 
+    ('cashbacks');
+
+-- TRIGGERS
+---- TRIGGERS: STORES
+CREATE TRIGGER IF NOT EXISTS tr_stores_ins AFTER INSERT ON stores BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'stores';
+END;
+CREATE TRIGGER IF NOT EXISTS tr_stores_upd AFTER UPDATE ON stores BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'stores';
+END;
+CREATE TRIGGER IF NOT EXISTS tr_stores_del AFTER DELETE ON stores BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'stores';
+END;
+
+---- TRIGGERS: PLATFORMS
+CREATE TRIGGER IF NOT EXISTS tr_platforms_ins AFTER INSERT ON platforms BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'platforms';
+END;
+CREATE TRIGGER IF NOT EXISTS tr_platforms_upd AFTER UPDATE ON platforms BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'platforms';
+END;
+CREATE TRIGGER IF NOT EXISTS tr_platforms_del AFTER DELETE ON platforms BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'platforms';
+END;
+
+---- TRIGGERS: PARTNERSHIPS
+CREATE TRIGGER IF NOT EXISTS tr_partnerships_ins AFTER INSERT ON partnerships BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'partnerships';
+END;
+CREATE TRIGGER IF NOT EXISTS tr_partnerships_upd AFTER UPDATE ON partnerships BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'partnerships';
+END;
+CREATE TRIGGER IF NOT EXISTS tr_partnerships_del AFTER DELETE ON partnerships BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'partnerships';
+END;
+
+---- TRIGGERS: CASHBACKS
+CREATE TRIGGER IF NOT EXISTS tr_cashbacks_ins AFTER INSERT ON cashbacks BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'cashbacks';
+END;
+CREATE TRIGGER IF NOT EXISTS tr_cashbacks_upd AFTER UPDATE ON cashbacks BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'cashbacks';
+END;
+CREATE TRIGGER IF NOT EXISTS tr_cashbacks_del AFTER DELETE ON cashbacks BEGIN
+    UPDATE table_updates SET updated_at = CURRENT_TIMESTAMP WHERE table_name = 'cashbacks';
+END;
+
+-- VIEWS
+---- VIEW: PARTNERSHIPS
+CREATE VIEW IF NOT EXISTS vw_partnerships AS
+SELECT 
+    -- Partnership
+    partnership.id AS partnership_id,
+    partnership.url AS partnership_url,
+    
+    -- Store
+    store.id AS store_id,
+    store.name AS store_name,
+    
+    -- Platform
+    platform.id AS platform_id,
+    platform.name AS platform_name
+FROM partnerships partnership
+JOIN stores store ON partnership.store_id = store.id
+JOIN platforms platform ON partnership.platform_id = platform.id;
+
+---- VIEW: CASHBACKS
+CREATE VIEW IF NOT EXISTS vw_cashbacks AS
+SELECT 
+    -- Cashback
+    c.id AS cashback_id,
+    c.global_value AS global_value,
+    c.max_value AS max_value,
+    c.description AS description,
+    c.date_start AS date_start,
+    c.date_end AS date_end,
+    
+    -- Partnership
+    vp.partnership_id AS partnership_id,
+    vp.partnership_url AS partnership_url,
+    
+    -- Store
+    vp.store_id AS store_id,
+    vp.store_name AS store_name,
+    
+    -- Platform
+    vp.platform_id AS platform_id,
+    vp.platform_name AS platform_name
+FROM cashbacks c
+JOIN vw_partnerships vp ON c.partnership_id = vp.partnership_id;
+
+---- VIEW: LATEST CASHBACKS
+CREATE VIEW IF NOT EXISTS vw_latest_cashbacks AS
+SELECT *
+FROM (
+    SELECT 
+        -- Cashback
+        c.id AS cashback_id,
+        c.global_value AS global_value,
+        c.max_value AS max_value,
+        c.description AS description,
+        c.date_start AS date_start,
+        c.date_end AS date_end,
+        
+        -- Partnership
+        vp.partnership_id AS partnership_id,
+        vp.partnership_url AS partnership_url,
+        
+        -- Store
+        vp.store_id AS store_id,
+        vp.store_name AS store_name,
+        
+        -- Platform
+        vp.platform_id AS platform_id,
+        vp.platform_name AS platform_name,
+
+        -- RANKING LAST CASHBACK BY Partnership_id
+        ROW_NUMBER() OVER (
+            PARTITION BY c.partnership_id 
+            ORDER BY c.date_start DESC, c.id DESC
+        ) as rn
+    FROM cashbacks c
+    JOIN vw_partnerships vp ON c.partnership_id = vp.partnership_id
+) 
+WHERE rn = 1;

@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<section class="hero-section">
+    <h1>Melhores Cashbacks</h1>
+    <p class="text-muted hero-subtitle">Encontre a maior taxa de retorno para suas lojas favoritas.</p>
+
+    <form action="/" method="get" class="search-container">
+        <div class="search-box">
+            <input type="text" name="q" placeholder="Buscar loja..." value="{{ request.args.get('q', '') }}"
+                class="search-input">
+            <button type="submit" class="search-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+            </button>
+        </div>
+    </form>
+</section>
+
+
+<div class="results-toolbar toolbar-container">
+    
+    <div class="toolbar-left">
+        <span class="store-count" id="store-count">
+            <span class="count-number">{{ stores | length }}</span> lojas monitoradas
+        </span>
+    </div>
+
+    
+    <div class="toolbar-center">
+        <div class="view-toggle">
+            <label class="toggle-option">
+                <input type="radio" name="view-mode" value="global" checked>
+                <span>Geral</span>
+            </label>
+            <label class="toggle-option">
+                <input type="radio" name="view-mode" value="max">
+                <span>Ofertas</span>
+            </label>
+        </div>
+    </div>
+
+    
+    <div class="toolbar-right">
+        <button type="button" class="filter-toggle" onclick="toggleFilters()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+            </svg>
+            <span>Plataformas</span>
+            <svg class="filter-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+        </button>
+
+        <div class="custom-sort-wrapper">
+            <div class="sort-box" id="custom-sort-box" onclick="toggleSortDropdown()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.5;">
+                    <line x1="4" y1="6" x2="20" y2="6"></line>
+                    <line x1="4" y1="12" x2="16" y2="12"></line>
+                    <line x1="4" y1="18" x2="10" y2="18"></line>
+                </svg>
+                <span id="sort-display" class="sort-select" style="user-select: none;">Maior Cashback</span>
+                <svg class="sort-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                    style="margin-left: 0.25rem;">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+            </div>
+
+            <div class="custom-sort-dropdown" id="custom-sort-dropdown">
+                <div class="custom-sort-option selected" data-value="cashback-desc"
+                    onclick="selectSortOption('cashback-desc', 'Maior Cashback')">
+                    Maior Cashback
+                </div>
+                <div class="custom-sort-option" data-value="name-asc"
+                    onclick="selectSortOption('name-asc', 'Nome (A-Z)')">
+                    Nome (A-Z)
+                </div>
+                <div class="custom-sort-option" data-value="name-desc"
+                    onclick="selectSortOption('name-desc', 'Nome (Z-A)')">
+                    Nome (Z-A)
+                </div>
+            </div>
+
+            <select id="sort-select" style="display: none;">
+                <option value="cashback-desc">Maior Cashback</option>
+                <option value="name-asc">Nome (A-Z)</option>
+                <option value="name-desc">Nome (Z-A)</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+
+<form action="/" method="get" style="margin: 0;">
+    <div class="filters-collapsible" id="filters-collapsible">
+        <div class="platform-filters" style="padding: 0.75rem 0;">
+            {% for platform in platforms %}
+            <label class="filter-chip">
+                <input type="checkbox" name="platforms" value="{{ platform.id }}" {% if not selected_platforms or
+                    platform.id in selected_platforms %}checked{% endif %}>
+                <span>{{ platform.name }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+</form>
+
+
+<section>
+    <div class="grid">
+        {% for store in stores %}
+        <a href="{{ url_for('store_details', store_id=store.id) }}" class="card store-card"
+            data-name="{{ store.name | lower }}" data-offers='{{ store.offers | tojson | safe }}'>
+            <span class="store-name">{{ store.name }}</span>
+
+            <div class="cashback-hero">{{ "%g"|format(store.max_cashback|float) }}%</div>
+
+            <div class="platform-badge">
+                Via <span class="badge-platform-name">{{ store.platform_name }}</span>
+            </div>
+        </a>
+        {% else %}
+        <div class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.3; margin-bottom: 1rem;">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <p class="text-muted">Nenhuma loja encontrada no momento.</p>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+
+<script>
+    function toggleSortDropdown() {
+        const dropdown = document.getElementById('custom-sort-dropdown');
+        const box = document.getElementById('custom-sort-box');
+        dropdown.classList.toggle('show');
+        box.classList.toggle('expanded');
+    }
+
+    function selectSortOption(value, text) {
+        document.getElementById('sort-display').innerText = text;
+        const select = document.getElementById('sort-select');
+        select.value = value;
+
+        // Update selected visual state
+        document.querySelectorAll('.custom-sort-option').forEach(opt => {
+            opt.classList.remove('selected');
+            if (opt.dataset.value === value) opt.classList.add('selected');
+        });
+
+        // Trigger change event to notify script.js
+        select.dispatchEvent(new Event('change'));
+
+        // Close dropdown
+        toggleSortDropdown();
+    }
+
+    // Close when clicking outside
+    document.addEventListener('click', function (e) {
+        const wrapper = document.querySelector('.custom-sort-wrapper');
+        const dropdown = document.getElementById('custom-sort-dropdown');
+        const box = document.getElementById('custom-sort-box');
+        if (wrapper && !wrapper.contains(e.target)) {
+            if (dropdown && dropdown.classList.contains('show')) {
+                dropdown.classList.remove('show');
+                box.classList.remove('expanded');
+            }
+        }
+    });
+
+    // Make sure format remains correct on initialization
+    window.addEventListener('DOMContentLoaded', () => {
+        // Keep value identical to our original setting if query string caused it to change
+        const currentVal = document.getElementById('sort-select').value;
+        const currentOpt = document.querySelector(`.custom-sort-option[data-value="${currentVal}"]`);
+        if (currentOpt) {
+            document.getElementById('sort-display').textContent = currentOpt.textContent.trim();
+            document.querySelectorAll('.custom-sort-option').forEach(opt => opt.classList.remove('selected'));
+            currentOpt.classList.add('selected');
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<section>
+    <h1 style="text-align: center;">Plataformas Monitoradas</h1>
+
+    <div class="grid" style="margin-top: 2rem;">
+        {% for platform in platforms %}
+        {% if platform.url %}
+        <a href="{{ platform.url }}" target="_blank" class="card platform-card"
+            style="text-decoration: none; color: inherit;">
+            <div class="platform-initial">{{ platform.name[0] | upper }}</div>
+            <div class="platform-name">{{ platform.name }}</div>
+        </a>
+        {% else %}
+        <div class="card platform-card">
+            <div class="platform-initial" style="filter: grayscale(1);">{{ platform.name[0] | upper }}</div>
+            <div class="platform-name" style="opacity: 0.5;">{{ platform.name }}</div>
+            <p class="text-sm text-muted">Sem link disponível</p>
+        </div>
+        {% endif %}
+        {% else %}
+        <div style="grid-column: 1/-1; text-align: center; padding: 3rem;">
+            <p class="text-muted">Nenhuma plataforma cadastrada.</p>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}
