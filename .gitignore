@@ -1,3 +1,6 @@
 /__pycache__
 .env
 access_counts.csv
+.db
+cache.db-shm
+cache.db-wal
