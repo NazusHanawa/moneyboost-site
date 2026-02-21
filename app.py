@@ -1,6 +1,14 @@
 
 import csv
 import os
+
+try:
+    for f in ['cache.db', 'cache.db-wal', 'cache.db-shm']:
+        if os.path.exists(f):
+            os.remove(f)
+except Exception:
+    pass
+
 from datetime import datetime, timedelta
 from flask import Flask, render_template, abort, request
 import db
@@ -196,5 +204,10 @@ def store_history(store_id):
     return {"history": data}
 
 if __name__ == '__main__':
-
-    app.run(host='0.0.0.0', port=80, debug=False)
+    cert = os.getenv('SSL_CERT_PATH')
+    key = os.getenv('SSL_KEY_PATH')
+    
+    if cert and key:
+        app.run(host='0.0.0.0', port=443, ssl_context=(cert, key))
+    else:
+        app.run(host='0.0.0.0', port=80)

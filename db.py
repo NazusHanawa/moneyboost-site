@@ -221,12 +221,15 @@ class CacheManager:
 
         print("DEBUG: Syncing cache from Turso...")
         try:
-
             self.cursor.execute("SELECT MAX(id) FROM cashbacks")
             row = self.cursor.fetchone()
             max_local_id = row[0] if row and row[0] is not None else 0
 
-            print(f"DEBUG: Fetching new cashbacks from ID > {max_local_id}")
+            # Get the IDs of the latest cashbacks we know about
+            self.cursor.execute("SELECT cashback_id FROM vw_latest_cashbacks")
+            active_cashback_ids = [str(r[0]) for r in self.cursor.fetchall()]
+
+            print(f"DEBUG: Fetching new cashbacks from ID > {max_local_id} AND {len(active_cashback_ids)} currently active cashbacks.")
 
             remote_client = libsql_client.create_client_sync(url=URL, auth_token=TOKEN)
 
@@ -234,7 +237,14 @@ class CacheManager:
             platforms = remote_client.execute("SELECT * FROM platforms").rows
             partnerships = remote_client.execute("SELECT * FROM partnerships").rows
 
-            cashbacks = remote_client.execute("SELECT * FROM cashbacks WHERE id > ?", [max_local_id]).rows
+            if active_cashback_ids:
+                # libsql_client driver accepts position parameters, we need to pass a list
+                placeholders = ",".join(["?"] * len(active_cashback_ids))
+                query = f"SELECT * FROM cashbacks WHERE id > ? OR id IN ({placeholders})"
+                params = [max_local_id] + active_cashback_ids
+                cashbacks = remote_client.execute(query, params).rows
+            else:
+                cashbacks = remote_client.execute("SELECT * FROM cashbacks WHERE id > ?", [max_local_id]).rows
 
             remote_client.close()
 
@@ -249,8 +259,8 @@ class CacheManager:
             self.cursor.executemany("INSERT INTO partnerships (id, store_id, platform_id, url) VALUES (?, ?, ?, ?)", partnerships)
 
             if cashbacks:
-                self.cursor.executemany("INSERT INTO cashbacks (id, partnership_id, value_global, value_specific, description, date_start, date_end) VALUES (?, ?, ?, ?, ?, ?, ?)", cashbacks)
-                print(f"DEBUG: Inserted {len(cashbacks)} new cashbacks.")
+                self.cursor.executemany("INSERT OR REPLACE INTO cashbacks (id, partnership_id, value_global, value_specific, description, date_start, date_end) VALUES (?, ?, ?, ?, ?, ?, ?)", cashbacks)
+                print(f"DEBUG: Inserted/Updated {len(cashbacks)} cashbacks.")
             else:
                 print("DEBUG: No new cashbacks found.")
 
